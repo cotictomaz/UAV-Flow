@@ -58,8 +58,8 @@ binary launched from a share loads too slowly for UnrealCV's startup timeout.
 
 - `LongPathsEnabled` was already set (the only step that would have needed elevation).
 - Miniconda installs per-user with `/InstallationType=JustMe`.
-- UnrealCV binds loopback, and Windows does not filter loopback traffic, so no firewall
-  approval is expected (see §3.5).
+- UnrealCV binds loopback (confirmed in §3.3: `env_ip = '127.0.0.1'`), and Windows does not
+  filter loopback traffic, so no firewall approval is needed.
 
 **Miniconda, no-admin install.** Download, then let `cmd.exe` expand the path — PowerShell
 drops the backslash in `/D=`, producing `C:\Users\<user>Miniconda3` and a "not writable"
@@ -74,31 +74,46 @@ conda init powershell   # then reopen PowerShell
 
 `/D=` must be last and unquoted — an installer quirk.
 
-## 2. Windows: repo + conda env
+## 2. Windows: repo + conda env — DONE
 
-The eval half of the repo has to exist on Windows too.
+The eval half of the repo has to exist on Windows too. Cloned under the user profile
+(not `Documents`/`Desktop`, which OneDrive may sync):
 
 ```powershell
-cd D:\
+mkdir $env:USERPROFILE\UAV
+cd $env:USERPROFILE\UAV
 git clone https://github.com/cotictomaz/UAV-Flow.git
-cd D:\UAV-Flow\UAV-Flow-Eval
+cd $env:USERPROFILE\UAV\UAV-Flow\UAV-Flow-Eval
 
-conda create -n unrealcv python=3.11 -y
+# conda-forge only: sidesteps conda 26's Anaconda-channel ToS prompt entirely
+conda create -n unrealcv python=3.11 -y -c conda-forge --override-channels
 conda activate unrealcv
 pip install -e .
 ```
 
+Working root: `C:\Users\cotic\UAV\UAV-Flow\`.
+
+The env is *named*, so it lives in `Miniconda3\envs\unrealcv` regardless of the directory
+it was created from. Only `pip install -e .` cares about the working directory (it reads
+`pyproject.toml`).
+
+Installed versions: **gym 0.10.9, unrealcv 1.2.0, numpy 2.0.3**. The 2018-era gym imports
+fine on Python 3.11 — no workaround needed. numpy 2.x alongside it is the residual risk;
+if `spaces.Box` or anything in `base_env.py` throws `np.float`/ABI errors, the fix is
+`pip install "numpy<2"`.
+
 `pip install -e .` pulls `gym==0.10.9`, `unrealcv>=1.1.5`, `opencv-python`, `matplotlib`,
 `simple_pid`, `pynput`, `docker`, `modelscope` (from `pyproject.toml`).
 
-- [ ] Verify the install resolved:
+- [x] Verified — imports clean, no `collections.Iterable` breakage on 3.11:
 
 ```powershell
 python -c "import gym, gym_unrealcv, unrealcv; print(gym.__version__, unrealcv.__version__)"
+python -c "import numpy as np; from gym import spaces; print(spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32).sample())"
 ```
 
-> `gym==0.10.9` is from 2018 and is being installed on Python 3.11. If it fails to import
-> (typically `collections.Iterable` style breakage), see Troubleshooting.
+The second line exercises the continuous `spaces.Box` machinery `base_env.py` builds per
+agent — the place numpy 2.x would most likely bite.
 
 **Editable install matters:** settings are read from the repo working tree, not a copy —
 `misc.get_settingpath` resolves `os.path.dirname(gym_unrealcv.__file__) + envs/setting/<file>`
@@ -106,68 +121,140 @@ python -c "import gym, gym_unrealcv, unrealcv; print(gym.__version__, unrealcv._
 
 ## 3. Windows: simulator binary
 
-### 3.1 Extract
+### 3.1 Extract — DONE
 
-Extract `Collection_WinNoEditor_0424_25.zip` to a **short** root, e.g. `D:\UE\`.
+Zip: `C:\Users\cotic\Downloads\Collection_WinNoEditor_0424_25.zip`, **47.7 GB**.
 
-- [ ] Confirm the executable path — the zip may or may not already contain the top folder,
-      so check for accidental double-nesting:
+**Do not use `Expand-Archive`** at this size — it's a thin .NET wrapper that can take hours.
+Windows' built-in `tar` (libarchive, handles ZIP64) is far faster:
 
 ```powershell
-Get-ChildItem -Path D:\UE -Recurse -Filter Collection.exe | Select-Object FullName
+New-Item -ItemType Directory -Force -Path $env:USERPROFILE\UAV\UE
+cd $env:USERPROFILE\UAV\UE
+tar -xf "$env:USERPROFILE\Downloads\Collection_WinNoEditor_0424_25.zip"
 ```
 
-Expected shape:
+Extracting from inside the destination avoids `tar`'s `-C` path handling, which failed with
+`could not chdir` here. Note `tar -C` also fails if the destination doesn't already exist —
+`New-Item -Force` creates intermediate folders, plain `mkdir` of a nested path may not.
+
+The zip **does** contain its own top-level folder, and there are **two** `Collection.exe`:
 
 ```
-D:\UE\Collection_WinNoEditor_0424_25\Collection\Binaries\Win64\Collection.exe
+C:\Users\cotic\UAV\UE\Collection_WinNoEditor_0424_25\Collection.exe                          <- launcher shim, DO NOT USE
+C:\Users\cotic\UAV\UE\Collection_WinNoEditor_0424_25\Collection\Binaries\Win64\Collection.exe <- the real one
 ```
 
-- [ ] Check whether `unrealcv.ini` sits next to the exe in `...\Binaries\Win64\`. The launcher
-      is expected to manage the UnrealCV port through it. **(unverified — confirm on Windows)**
+- [x] `unrealcv.ini` confirmed present next to the real binary, with the exact layout
+      `RunUnreal` assumes (see §3.3):
 
-### 3.2 Point the config at it
+```ini
+[UnrealCV.Core]
+Port=9000
+Width=640
+Height=480
+FOV=90.000000
+EnableInput=True
+EnableRightEye=False
+```
 
-Edit `UAV-Flow-Eval/gym_unrealcv/envs/setting/Track/DowntownWest.json`, field `env_bin_win`.
-It currently holds the authors' path (`D:\unrealzoo-gym-new\UnrealEnv\...`).
+`Width`/`Height` become `256` after the first launch — `ConfigUEWrapper` sets the resolution
+and `write_resolution` rewrites the file. Backed up first:
+
+```powershell
+$ini = "$env:USERPROFILE\UAV\UE\Collection_WinNoEditor_0424_25\Collection\Binaries\Win64\unrealcv.ini"
+Copy-Item $ini "$ini.bak"
+```
+
+Keep the zip until §3.6 passes; ~100 GB total until then.
+
+### 3.2 Point the config at it — DONE
+
+Edited `UAV-Flow-Eval/gym_unrealcv/envs/setting/Track/DowntownWest.json`, field `env_bin_win`
+(it shipped with the authors' path, `D:\unrealzoo-gym-new\UnrealEnv\...`):
 
 ```json
-"env_bin_win": "D:\\UE\\Collection_WinNoEditor_0424_25\\Collection\\Binaries\\Win64\\Collection.exe",
+"env_bin_win": "C:\\Users\\cotic\\UAV\\UE\\Collection_WinNoEditor_0424_25\\Collection\\Binaries\\Win64\\Collection.exe",
 ```
 
 **Backslashes must be doubled** — it's JSON. Leave `env_bin` (Linux) and `env_map` alone;
 `base_env.py:109-117` selects `env_bin_win` on `sys.platform == 'win32'`, and `env_map`
 (`DowntownWest`) is what `set_map` switches to after launch.
 
-- [ ] Validate the JSON parses and the path exists:
+- [x] Validated — parses, and the path resolves:
 
 ```powershell
-python -c "import json,os; p=json.load(open(r'gym_unrealcv\envs\setting\Track\DowntownWest.json'))['env_bin_win']; print(p, os.path.exists(p))"
+python -c "import json,os; p=json.load(open(r'gym_unrealcv\envs\setting\Track\DowntownWest.json'))['env_bin_win']; print(p); print('exists:', os.path.exists(p))"
 ```
 
-### 3.3 How launching actually works
+If this prints `exists: False`, dump the value with `repr()` before re-editing — the string
+is valid JSON but wrong. Watch for the doubled `Collection` level
+(`...\Collection_WinNoEditor_0424_25\Collection\Binaries\...`), which is easy to drop.
+
+### 3.3 How launching actually works — VERIFIED (unrealcv 1.2.0)
 
 **Do not start `Collection.exe` yourself before the eval script.** The env launches it:
 `base_env.py:121` builds `RunUnreal(ENV_BIN=env_bin, ENV_MAP=env_map)` and
 `base_env.py:631-633` calls `ue_binary.start(...)`, which returns the `(ip, port)` that
 `Character_API` then connects to. A manually-started instance won't be the one it talks to.
 
-- [ ] Worth confirming how `RunUnreal` resolves the path (absolute vs. relative to the
-      UnrealEnv dir) on your machine — the shipped config uses an absolute path, so absolute
-      is the safe choice:
+Read from `RunUnreal` source on this machine:
 
-```powershell
-python -c "import inspect, unrealcv.launcher as l; print(inspect.getsource(l.RunUnreal))"
-python -c "import unrealcv.util as u; print(u.get_path2UnrealEnv())"
+- **Absolute paths are used verbatim.** `__init__` branches on `os.path.isabs(ENV_BIN)`;
+  absolute → `path2binary = os.path.abspath(ENV_BIN)`, no `UnrealEnv` joining. An
+  `assert os.path.exists(self.path2binary)` fires immediately on a bad path — so a wrong
+  `env_bin_win` fails loudly at `gym.make`, not mysteriously later.
+- **The binary MUST be the one under `Binaries\Win64`, not the package-root shim.**
+  `parse_path` does `part_path.index('Binaries')` — with the root-level `Collection.exe`
+  that raises `ValueError`. This is a hard requirement, not a convention.
+- **`path2env` is computed oddly on Windows** (`parse_path` prepends `/` to `C:`, giving
+  `/C:\Users\...`) but it is only consumed by the Docker path and the commented-out
+  `modify_permission`. Harmless for a local run.
+- **Port**: `read_port()` parses `unrealcv.ini` as `int(ss[1][-4:])` — i.e. it assumes the
+  second whitespace token is `Port=NNNN` with a 4-digit port. Default 9000.
+- **`unrealcv.ini` is rewritten on every launch.** `write_resolution` overwrites lines 3
+  and 4 by index (`Width=`, `Height=`) and `write_port` overwrites line 2. Both are
+  line-index based and will corrupt an ini with a different layout. **Back it up first.**
+- **IP is always `127.0.0.1`** (`local_host=True` default; base_env doesn't override).
+  Confirms loopback → **no Windows Firewall involvement**, which matters here since there
+  are no admin rights on this machine.
+- **Port-free check relies on TCP self-connect.** On Windows `isPortFree` does
+  `bind()` then `connect()` to the *same* address; it returns True only because a TCP
+  simultaneous-open to yourself succeeds. If it ever misbehaves the symptom is a hang in
+  the `while not isPortFree` loop, incrementing the port.
+- **Rendering**: no `gpu_id` passed by `base_env.launch_ue_env`, `opengl=False` → **Vulkan**,
+  `offscreen=False`, `nullrhi=False`. The map name is passed as the first CLI arg, so the
+  binary boots straight into DowntownWest.
+- **`start()` does not poll for readiness** — it is a flat `time.sleep(sleep_time)` and then
+  it returns. See §3.4 below; this is the most likely first-run failure.
+- **UE stdout/stderr go to `DEVNULL`**, so crashes are silent in the console. The real log
+  is at `<package>\Collection\Saved\Logs\*.log`.
+
+### 3.4 Raise the launch timeout before the first run — DONE
+
+`base_env.py:631-633` passes `sleep_time=10`, and `RunUnreal.start()` treats that as the
+*entire* startup budget — it sleeps, then hands the port to `Character_API` with no
+readiness check. A 47.7 GB package booting DowntownWest from a cold file cache will not be
+serving UnrealCV in 10 s, and the failure surfaces as a connection error that looks like a
+networking problem rather than a timing one.
+
+Raise it in `gym_unrealcv/envs/base_env.py:633`:
+
+```python
+nullrhi=self.nullrhi, sleep_time=60)   # was sleep_time=10
 ```
 
-### 3.4 Textures are *not* needed
+Costs 50 extra seconds once per run (the binary launches on the first `reset()` only), and
+removes the single most likely first-run failure. Can be tuned down once we know the real
+cold-start time.
+
+### 3.5 Textures are *not* needed
 
 `load_env.py -e Textures` is unnecessary here. `get_textures()` is only reached when
 `'track_train' in env_name` (`augmentation.py:15-21`), and our env is `DowntownWest`.
 The env id ends in `v0` → `reset_type == 0`, so `environment_augmentation` never fires either.
 
-### 3.5 Smoke test — simulator alone, no server
+### 3.6 Smoke test — simulator alone, no server ← **NEXT STEP, NOT YET RUN**
 
 This mirrors `batch_run_act_all.py:479-490` exactly, so it isolates simulator problems
 from server/network problems. Run from `UAV-Flow-Eval\`:
@@ -189,11 +276,27 @@ print(env.unwrapped.unrealcv.get_camera_config())
 env.close()
 ```
 
-- [ ] A game window opens, loads DowntownWest, prints a camera config, exits cleanly.
-- [ ] Firewall: no prompt expected. UnrealCV binds loopback and Windows does not filter
-      loopback traffic. If a dialog does appear and can't be approved (no admin on this
-      machine), check what IP `ue_binary.start()` actually returned before assuming it's
-      the firewall.
+Expected sequence:
+
+1. A list of path components (`parse_path`'s debug `print`).
+2. `Running docker-free env, pid:NNNN` — binary spawned.
+3. `Please wait for a while to launch env......` then **60 s of silence** (§3.4). Not a hang.
+4. Game window appears; first launch may sit compiling shaders and look frozen.
+5. Two drones spawn, a camera config dict prints, the window closes.
+
+- [ ] Game window opens, loads DowntownWest, prints a camera config, exits cleanly.
+- [x] Firewall: no prompt expected — §3.3 confirms `env_ip = '127.0.0.1'` and Windows does
+      not filter loopback. Relevant because there are no admin rights here.
+
+Failure triage:
+
+| Symptom | Meaning |
+|---|---|
+| Assertion on the binary path | `env_bin_win` wrong — but §3.2 already validated it |
+| Connection refused after the 60 s | Game needed longer, or crashed. Read the newest log in `...\Collection\Saved\Logs\` — UE stdout is `DEVNULL`, so the console shows nothing |
+| numpy error | The numpy 2.0.3 risk from §2 → `pip install "numpy<2"` |
+| Window opens then instantly closes | GPU/Vulkan problem; the UE log will say |
+| Hang with the port climbing | The `isPortFree` self-connect quirk (§3.3) |
 
 The env id decomposes as `UnrealTrack-<map>-<action><obs>-v<reset_type>` and registers
 `gym_unrealcv.envs:Track` with `env_file=Track/DowntownWest.json` (`gym_unrealcv/__init__.py:138-166`)
@@ -230,7 +333,8 @@ Loads with `flash_attention_2` + bf16 on `gpu_id: 0`. The A100-40GB is plenty fo
 
 ```powershell
 # Windows, conda env unrealcv, tunnel up, server up
-cd D:\UAV-Flow\UAV-Flow-Eval
+cd $env:USERPROFILE\UAV\UAV-Flow\UAV-Flow-Eval
+conda activate unrealcv
 python batch_run_act_all.py
 ```
 
@@ -280,7 +384,32 @@ Filling in `env_bin_win` and `cfg["model_path"]` dirties the tree — **don't co
 
 ## 10. Record for reproducibility
 
-- [ ] Windows GPU + driver version
-- [ ] `gym` / `unrealcv` / `numpy` versions in the `unrealcv` env
+- [x] Windows GPU + driver: RTX A4000 (8 GB), driver 580.92, CUDA 13.0
+- [x] Env versions: Python 3.11 (conda-forge), gym 0.10.9, unrealcv 1.2.0, numpy 2.0.3
 - [ ] Checkpoint revision (HF commit hash) used for `model_path`
 - [ ] `metric.txt` from the completed run
+
+## 11. Progress
+
+| Step | Status |
+|---|---|
+| §1 Windows prerequisites | **done** — no admin needed after all |
+| §2 Repo + conda env | **done** — `C:\Users\cotic\UAV\UAV-Flow`, env `unrealcv` |
+| §3.1 Extract simulator | **done** — 47.7 GB via `tar` |
+| §3.2 Configure `env_bin_win` | **done** — validated `exists: True` |
+| §3.3 Launcher behavior | **done** — read from source, findings recorded |
+| §3.4 `sleep_time` 10 → 60 | **done** |
+| §3.5 Textures | **n/a** — not needed for DowntownWest |
+| §3.6 Simulator smoke test | **next** |
+| §4 SSH tunnel | not started |
+| §5 Linux inference server | not started |
+| §6 Evaluation run | not started |
+
+### Local edits made (do not commit — see §9)
+
+| File | Change |
+|---|---|
+| `gym_unrealcv/envs/setting/Track/DowntownWest.json` | `env_bin_win` → local extraction path |
+| `gym_unrealcv/envs/base_env.py:633` | `sleep_time=10` → `sleep_time=60` |
+| `<package>\...\Win64\unrealcv.ini` | backed up to `unrealcv.ini.bak`; rewritten by launcher |
+| `UAV-Flow-Eval/smoke_sim.py` | new scratch file for §3.6, not part of the repo |
