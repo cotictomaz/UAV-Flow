@@ -2,7 +2,7 @@
     "env_name": "DowntownWest",
     "env_bin": "Collection_WinNoEditor_0424_25\\Collection\\Binaries\\Win64\\Collection.exe",
     "env_map": "DowntownWest",
-    "env_bin_win": "D:\\unrealzoo-gym-new\\UnrealEnv\\Collection_WinNoEditor_0424_25\\Collection\\Binaries\\Win64\\Collection.exe",
+    "env_bin_win": "C:\\Users\\cotic\\UAV\\UE\\Collection_WinNoEditor_0424_25\\Collection\\Binaries\\Win64\\Collection.exe",
     "third_cam": {
         "cam_id": 0,
         "pitch": -90,

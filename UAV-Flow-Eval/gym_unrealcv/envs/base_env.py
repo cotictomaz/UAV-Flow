@@ -632,7 +632,7 @@ class UnrealCv_base(gym.Env):
         # launch the UE4 binary
         env_ip, env_port = self.ue_binary.start(docker=self.docker, resolution=self.resolution, display=self.display,
                                                opengl=self.use_opengl, offscreen=self.offscreen_rendering,
-                                               nullrhi=self.nullrhi,sleep_time=10)
+                                               nullrhi=self.nullrhi,sleep_time=50)
 
 
         # connect to UnrealCV Server

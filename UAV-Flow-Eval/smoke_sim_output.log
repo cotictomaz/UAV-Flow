@@ -1,0 +1,35 @@
+﻿python : C:\Users\cotic\Miniconda3\envs\unrealcv\Lib\site-packages\gym\envs\registration.py:12: UserWarning: pkg_resources is 
+deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal 
+as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+At line:1 char:438
++ ... Flow-Eval"; python -u smoke_sim.py *> smoke_sim_output.log 2>&1; Writ ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\cotic\... Setuptools<81.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  import pkg_resources # takes ~400ms to load, so we import it lazily
+C:\Users\cotic\Miniconda3\envs\unrealcv\Lib\site-packages\gym\envs\registration.py:14: PkgResourcesDeprecationWarning: Parameters 
+to load are deprecated.  Call .resolve and .require separately.
+  result = entry_point.load(False)
+['C:', 'Users', 'cotic', 'UAV', 'UE', 'Collection_WinNoEditor_0424_25', 'Collection', 'Binaries', 'Win64', 'Collection.exe']
+Running docker-free env, pid:18996
+Please wait for a while to launch env......
+=>Info: using ip-port socket
+INFO:__init__:238:Got connection confirm: b'connected to Collection'
+UnrealCV server version: 0.3.10
+waiting for remove agent BP_Character_2...
+Remove finished!
+waiting for remove agent BP_animal_2...
+Remove finished!
+waiting for remove agent BP_BaseCar_2...
+Remove finished!
+waiting for remove agent Sport_2...
+Remove finished!
+cam_flag: [False, True, False, False]
+0
+1
+[-11846.424, -311.312, 40.0]
+drones: ['BP_Drone01_2', 'drone_EP0_1']
+flying drone start pose: [-10303.518, -2358.863, 160.685]
+observer drone pose: [-7803.518, -1958.863, 1060.685]
+flying drone end pose: [-11422.047, -2442.945, 632.226]

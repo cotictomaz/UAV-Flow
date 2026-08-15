@@ -450,6 +450,7 @@ if __name__ == '__main__':
     parser.add_argument("-s", '--seed', default=DEFAULT_SEED, type=int, help='Random seed')
     parser.add_argument("-f", '--json_folder', default=DEFAULT_JSON_FOLDER, help='Folder path containing batch task json files')
     parser.add_argument("-o", '--images_dir', default=DEFAULT_IMAGES_DIR, help='Directory to save images and trajectory logs')
+    parser.add_argument('--server_host', default='127.0.0.1', help='Inference server host/IP')
     parser.add_argument("-p", '--server_port', default=DEFAULT_SERVER_PORT, type=int, help='Inference server port')
     parser.add_argument("-m", '--max_steps', default=DEFAULT_MAX_STEPS, type=int, help='Maximum inference steps')
     parser.add_argument("-i", "--instruction_type", default=DEFAULT_INSTRUCTION_TYPE, choices=["instruction", "instruction_unified"], help='Choose which field to use: instruction or instruction_unified')
@@ -474,7 +475,7 @@ if __name__ == '__main__':
     min_span_y = args.min_span_y if args.min_span_y is not None else DEFAULT_MIN_SPAN_Y
     min_span_z = args.min_span_z if args.min_span_z is not None else DEFAULT_MIN_SPAN_Z
 
-    server_url = f"http://127.0.0.1:{args.server_port}/predict"
+    server_url = f"http://{args.server_host}:{args.server_port}/predict"
 
     env = gym.make(args.env_id)
     if int(args.time_dilation) > 0:
